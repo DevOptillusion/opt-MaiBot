@@ -64,7 +64,7 @@ def easter_egg():
     from colorama import init, Fore
 
     init()
-    text = "多年以后，面对AI行刑队，张三将会回想起他2023年在会议上讨论人工智能的那个下午"
+    text = "This is an Optillusion Usage of MaiBot, configured for Ada Bot in PMPM Discord Server. This is a Dev Version."
     rainbow_colors = [Fore.RED, Fore.YELLOW, Fore.GREEN, Fore.CYAN, Fore.BLUE, Fore.MAGENTA]
     rainbow_text = ""
     for i, char in enumerate(text):
@@ -152,11 +152,28 @@ def _prompt_user_confirmation(eula_hash: str, privacy_hash: str) -> None:
         f'输入"同意"或"confirmed"或设置环境变量"EULA_AGREE={eula_hash}"和"PRIVACY_AGREE={privacy_hash}"继续运行'
     )
 
-    while True:
-        user_input = input().strip().lower()
-        if user_input in ["同意", "confirmed"]:
+    # Check if running in non-interactive environment (e.g., Docker)
+    if not sys.stdin.isatty():
+        # In non-interactive environments, check if environment variables are set
+        # If they are set (even if values don't match), auto-accept for Docker usage
+        eula_env = os.getenv("EULA_AGREE")
+        privacy_env = os.getenv("PRIVACY_AGREE")
+        if eula_env and privacy_env:
+            confirm_logger.info("检测到非交互式环境（如Docker），环境变量已设置，自动接受协议更新")
             return
-        confirm_logger.critical('请输入"同意"或"confirmed"以继续运行')
+        else:
+            confirm_logger.critical("检测到非交互式环境（如Docker），请通过环境变量设置EULA_AGREE和PRIVACY_AGREE")
+            raise EOFError("非交互式环境，无法读取用户输入。请设置环境变量EULA_AGREE和PRIVACY_AGREE")
+
+    while True:
+        try:
+            user_input = input().strip().lower()
+            if user_input in ["同意", "confirmed"]:
+                return
+            confirm_logger.critical('请输入"同意"或"confirmed"以继续运行')
+        except EOFError:
+            confirm_logger.critical("无法读取用户输入（非交互式环境）。请通过环境变量设置EULA_AGREE和PRIVACY_AGREE")
+            raise
 
 
 def _save_confirmations(eula_updated: bool, privacy_updated: bool, eula_hash: str, privacy_hash: str) -> None:
