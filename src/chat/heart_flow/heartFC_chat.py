@@ -544,7 +544,14 @@ class HeartFChatting:
             # 处理动作并获取结果（固定记录一次动作信息）
             result = await action_handler.execute()
             success, action_text = result
-
+            
+            # Stop Discord typing indicator when action finishes
+            try:
+                if self.chat_stream and self.chat_stream.platform == "discord":
+                    import api_server
+                    api_server.stop_discord_typing(self.chat_stream)
+            except Exception as e:
+                logger.debug(f"Error stopping Discord typing after action: {e}")
 
             return success, action_text
 

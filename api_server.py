@@ -15,6 +15,12 @@ load_dotenv(".env", override=True)
 # Add the current directory to Python path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Import logger after path is set up
+from src.common.logger import get_logger
+
+# Set up logger with module name
+logger = get_logger("api_server")
+
 app = FastAPI(title="MaiM Bot API Server")
 
 class ChatRequest(BaseModel):
@@ -38,13 +44,42 @@ captured_replies = {}  # Store captured replies by message_id
 discord_user_id_mapping = {}
 WEB_API_URL = os.getenv("WEB_API_URL", "http://web-api:8000")
 
+def stop_discord_typing(chat_stream) -> None:
+    """Stop Discord typing indicator for a given chat stream"""
+    try:
+        if not chat_stream or chat_stream.platform != "discord":
+            return
+        
+        # Get Discord user_id from mapping (bot uses username as user_id)
+        bot_user_id = chat_stream.user_info.user_id if chat_stream.user_info else None
+        discord_user_id = discord_user_id_mapping.get(bot_user_id) if bot_user_id else None
+        
+        if not discord_user_id:
+            return
+        
+        # Get channel_id from group_info
+        channel_id = None
+        if chat_stream.group_info:
+            channel_id = str(chat_stream.group_info.group_id)
+        
+        # Send stop typing request
+        stop_typing_payload = {
+            "user_id": discord_user_id,
+            "action": "stop",
+            "channel_id": channel_id
+        }
+        requests.post(f"{WEB_API_URL}/discord_typing", json=stop_typing_payload, timeout=2)
+        logger.debug(f"[Discord] Stopped typing indicator for user {discord_user_id} after action completion")
+    except Exception as e:
+        logger.debug(f"[Discord] Error stopping typing indicator after action: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the MaiM Bot system on startup"""
     global chat_bot, main_system
     
     try:
-        print("Initializing MaiM Bot API Server...")
+        logger.info("Initializing MaiM Bot API Server...")
         
         # Import the bot modules
         from src.chat.message_receive.bot import ChatBot
@@ -52,6 +87,8 @@ async def startup_event():
         from maim_message import Seg, UserInfo, BaseMessageInfo
         from src.chat.message_receive.message import MessageRecv
         from src.chat.message_receive.chat_stream import get_chat_manager
+        from src.config.config import global_config
+        import tomlkit
         
         # Initialize the main system
         main_system = MainSystem()
@@ -61,15 +98,28 @@ async def startup_event():
         chat_bot = ChatBot()
         await chat_bot._ensure_started()
         
+        # Map bot's nickname to Discord account ID for message sending
+        # The bot uses its nickname ("paris") as user_id for Discord messages
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), "..", "config", "bot_config.toml")
+            with open(config_path, "r", encoding="utf-8") as f:
+                bot_config = tomlkit.parse(f.read())
+                discord_account = bot_config.get("bot", {}).get("discord_account")
+                if discord_account:
+                    # Map bot's nickname (lowercase) to its Discord account ID
+                    bot_nickname_lower = global_config.bot.nickname.lower()
+                    discord_user_id_mapping[bot_nickname_lower] = str(discord_account)
+                    logger.info(f"Mapped bot nickname '{bot_nickname_lower}' to Discord account {discord_account}")
+        except Exception as e:
+            logger.debug(f"Could not set up bot Discord mapping: {e}")
+        
         # Patch message sender to intercept Discord messages
         _patch_discord_message_sender()
         
-        print("MaiM Bot API Server initialized successfully!")
+        logger.info("MaiM Bot API Server initialized successfully!")
         
     except Exception as e:
-        print(f"Failed to initialize MaiM Bot API Server: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Failed to initialize MaiM Bot API Server: {e}", exc_info=True)
 
 @app.get("/")
 async def root():
@@ -86,14 +136,29 @@ async def health_check():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Process a chat message through the MaiM Bot system"""
-    print(f"[CORE-API] /chat endpoint called!", flush=True)
+    logger.info("[CORE-API] /chat endpoint called!")
     global chat_bot, main_system
     
     if not chat_bot or not main_system:
         raise HTTPException(status_code=503, detail="Bot system not initialized")
     
     try:
-        print(f"API Server received message from {request.nickname or request.username} (username: {request.username}): {request.message}")
+        logger.info(f"API Server received message from {request.nickname or request.username} (username: {request.username}): {request.message}")
+        
+        # Start typing indicator immediately when core API is called
+        try:
+            discord_user_id = request.user_id
+            channel_id = request.channel_id
+            
+            typing_payload = {
+                "user_id": discord_user_id,
+                "action": "start",
+                "channel_id": channel_id
+            }
+            requests.post(f"{WEB_API_URL}/discord_typing", json=typing_payload, timeout=2)
+            logger.info(f"[CORE-API] Started typing indicator for user {discord_user_id}")
+        except Exception as e:
+            logger.error(f"[CORE-API] Error starting typing indicator: {e}", exc_info=True)
         
         # Store user_id mapping: bot uses username, Discord bridge needs numeric ID
         discord_user_id_mapping[request.username] = request.user_id
@@ -135,7 +200,7 @@ async def chat(request: ChatRequest):
         timestamp = time.time()
         message_id = f"send_api_{int(timestamp * 1000)}"
         
-        print(f"API Server generating message_id: {message_id}")
+        logger.debug(f"API Server generating message_id: {message_id}")
         
         message_info = BaseMessageInfo(
             platform="discord",
@@ -178,9 +243,7 @@ async def chat(request: ChatRequest):
         return ChatResponse(response=response_text, success=True)
         
     except Exception as e:
-        print(f"Error processing message in API Server: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error processing message in API Server: {e}", exc_info=True)
         return ChatResponse(
             response=f"Sorry, I encountered an error processing your message: {str(e)}", 
             success=False
@@ -195,7 +258,7 @@ async def process_message(request: Dict[str, Any]):
         raise HTTPException(status_code=503, detail="Bot system not initialized")
     
     try:
-        print(f"API Server received message data: {json.dumps(request, indent=2)}")
+        logger.info(f"API Server received message data: {json.dumps(request, indent=2)}")
         
         # Process the message through the bot
         await chat_bot.message_process(request)
@@ -206,9 +269,7 @@ async def process_message(request: Dict[str, Any]):
         )
         
     except Exception as e:
-        print(f"Error processing message data in API Server: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error processing message data in API Server: {e}", exc_info=True)
         return ChatResponse(
             response=f"Error processing message: {str(e)}",
             success=False
@@ -222,6 +283,7 @@ def _patch_discord_message_sender():
         
         from src.chat.message_receive.message import MessageSending
         from maim_message import Seg
+        import time
         
         async def patched_send(message: MessageSending, show_log=True) -> bool:
             if not (message.message_info and message.message_info.platform == "discord"):
@@ -252,6 +314,21 @@ def _patch_discord_message_sender():
                 if not content:
                     return True
                 
+                # Stop typing indicator when message is sent
+                channel_id = None
+                if message.message_info.group_info:
+                    channel_id = str(message.message_info.group_info.group_id)
+                
+                try:
+                    stop_typing_payload = {
+                        "user_id": discord_user_id,
+                        "action": "stop",
+                        "channel_id": channel_id
+                    }
+                    requests.post(f"{WEB_API_URL}/discord_typing", json=stop_typing_payload, timeout=2)
+                except Exception as e:
+                    logger.error(f"[Discord] Error stopping typing: {e}", exc_info=True)
+                
                 payload = {
                     "platform": "discord",
                     "user_id": discord_user_id,
@@ -259,25 +336,25 @@ def _patch_discord_message_sender():
                     "message_type": message_type
                 }
                 
-                if message.message_info.group_info:
-                    payload["channel_id"] = str(message.message_info.group_info.group_id)
+                if channel_id:
+                    payload["channel_id"] = channel_id
                 
-                print(f"[Discord] Sending to web-api: user_id={discord_user_id}, content={content[:50]}...")
+                logger.debug(f"[Discord] Sending to web-api: user_id={discord_user_id}, content={content[:50]}...")
                 response = requests.post(f"{WEB_API_URL}/send_message", json=payload, timeout=10)
                 
                 if response.status_code == 200:
-                    print(f"[Discord] Successfully sent to web-api")
+                    logger.debug(f"[Discord] Successfully sent to web-api")
                     return True
                 else:
                     return await original_send(message, show_log)
             except Exception as e:
-                print(f"[Discord] Error: {e}")
+                logger.error(f"[Discord] Error: {e}", exc_info=True)
                 return await original_send(message, show_log)
         
         uni_module._send_message = patched_send
-        print("✓ Patched Discord message sender")
+        logger.info("✓ Patched Discord message sender")
     except Exception as e:
-        print(f"✗ Failed to patch: {e}")
+        logger.error(f"✗ Failed to patch: {e}", exc_info=True)
 
 if __name__ == "__main__":
     import uvicorn

@@ -101,6 +101,7 @@ class LogFormatter:
         # 模块颜色映射
         self.module_colors = {
             "api": "#00FF00",
+            "api_server": "#00CED1",  # Dark turquoise for API server
             "emoji": "#00FF00",
             "chat": "#0080FF",
             "config": "#FFFF00",
@@ -497,6 +498,7 @@ class LogViewer:
         # 模块名映射
         self.module_name_mapping = {
             "api": "API接口",
+            "api_server": "API服务器",
             "async_task_manager": "异步任务管理器",
             "background_tasks": "后台任务",
             "base_tool": "基础工具",

@@ -29,4 +29,5 @@ COPY . .
 
 EXPOSE 8000
 
-ENTRYPOINT [ "python","bot.py" ]
+# ENTRYPOINT removed to allow command override from docker-compose.yml
+CMD [ "python","bot.py" ]

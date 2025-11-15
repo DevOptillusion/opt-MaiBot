@@ -17,6 +17,78 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
+def ensure_package_installed(package_name: str, requirements_file: str = "requirements.txt"):
+    """Ensure a Python package is installed, install it if missing"""
+    try:
+        __import__(package_name)
+        print(f"✓ {package_name} is already installed", flush=True)
+    except ImportError:
+        print(f"Installing {package_name}...", flush=True)
+        try:
+            # First, try to install from requirements.txt to get the correct version
+            requirements_path = current_dir / requirements_file
+            if requirements_path.exists():
+                # Extract the package line from requirements.txt
+                with open(requirements_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and line.startswith(package_name):
+                            package_spec = line
+                            print(f"Found {package_spec} in requirements.txt", flush=True)
+                            # Try using uv pip if available (faster)
+                            result = subprocess.run(
+                                [sys.executable, "-m", "uv", "pip", "install", "--system", package_spec],
+                                capture_output=True,
+                                text=True,
+                                timeout=120
+                            )
+                            if result.returncode == 0:
+                                print(f"✓ Successfully installed {package_spec} using uv pip", flush=True)
+                                return
+                            # Fallback to regular pip
+                            print(f"uv pip failed, trying regular pip...", flush=True)
+                            result = subprocess.run(
+                                [sys.executable, "-m", "pip", "install", package_spec],
+                                capture_output=True,
+                                text=True,
+                                timeout=120
+                            )
+                            if result.returncode == 0:
+                                print(f"✓ Successfully installed {package_spec} using pip", flush=True)
+                                return
+                            break
+            
+            # If not found in requirements.txt or installation failed, try installing just the package name
+            print(f"Installing {package_name} directly...", flush=True)
+            result = subprocess.run(
+                [sys.executable, "-m", "uv", "pip", "install", "--system", package_name],
+                capture_output=True,
+                text=True,
+                timeout=120
+            )
+            if result.returncode == 0:
+                print(f"✓ Successfully installed {package_name} using uv pip", flush=True)
+            else:
+                # Fallback to regular pip
+                print(f"uv pip failed, trying regular pip...", flush=True)
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", package_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                if result.returncode == 0:
+                    print(f"✓ Successfully installed {package_name} using pip", flush=True)
+                else:
+                    print(f"✗ Failed to install {package_name}: {result.stderr}", flush=True)
+                    raise RuntimeError(f"Failed to install {package_name}")
+        except subprocess.TimeoutExpired:
+            print(f"✗ Timeout while installing {package_name}", flush=True)
+            raise
+        except Exception as e:
+            print(f"✗ Error installing {package_name}: {e}", flush=True)
+            raise
+
 class CoreServiceManager:
     def __init__(self):
         self.processes = []
@@ -115,6 +187,14 @@ def main():
     
     # Set the working directory to the script location
     os.chdir(current_dir)
+    
+    # Ensure required packages are installed
+    print("Checking required packages...", flush=True)
+    try:
+        ensure_package_installed("anthropic")
+    except Exception as e:
+        print(f"Warning: Could not install anthropic: {e}", flush=True)
+        print("Continuing anyway, but Claude models may not work.", flush=True)
     
     # Create and run service manager
     manager = CoreServiceManager()

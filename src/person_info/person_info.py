@@ -210,7 +210,10 @@ class Person:
         return person
 
     def __init__(self, platform: str = "", user_id: str = "", person_id: str = "", person_name: str = ""):
-        if platform == global_config.bot.platform and user_id == global_config.bot.qq_account:
+        # Handle bot itself: for QQ platform with QQ account, or Discord platform with bot's nickname
+        is_bot_qq = platform == global_config.bot.platform and user_id == global_config.bot.qq_account
+        is_bot_discord = platform == "discord" and user_id.lower() == global_config.bot.nickname.lower()
+        if is_bot_qq or is_bot_discord:
             self.is_known = True
             self.person_id = get_person_id(platform, user_id)
             self.user_id = user_id

@@ -1,5 +1,6 @@
 aiohttp>=3.12.14
 aiohttp-cors>=0.8.1
+anthropic>=0.39.0
 colorama>=0.4.6
 faiss-cpu>=1.11.0
 fastapi>=0.116.0

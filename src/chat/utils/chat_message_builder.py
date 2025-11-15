@@ -49,6 +49,8 @@ def replace_user_references(
                     return f"{global_config.bot.nickname}(你)"
                 if platform == "telegram" and user_id == getattr(global_config.bot, "telegram_account", ""):
                     return f"{global_config.bot.nickname}(你)"
+                if platform == "discord" and user_id.lower() == global_config.bot.nickname.lower():
+                    return f"{global_config.bot.nickname}(你)"
             person = Person(platform=platform, user_id=user_id)
             return person.person_name or user_id  # type: ignore
 
@@ -434,12 +436,15 @@ def _build_readable_messages_internal(
 
         person = Person(platform=platform, user_id=user_id)
         # 根据 replace_bot_name 参数决定是否替换机器人名称
-        person_name = (
-            person.person_name or f"{user_nickname}" or (f"昵称：{user_cardname}" if user_cardname else "某人")
-        )
+        # If person is not known (shows as "未知用户"), use the nickname from the message instead
+        if not person.is_known or (person.person_name and person.person_name.startswith("未知用户")):
+            person_name = user_nickname or (f"昵称：{user_cardname}" if user_cardname else "某人")
+        else:
+            person_name = person.person_name or user_nickname or (f"昵称：{user_cardname}" if user_cardname else "某人")
         if replace_bot_name and (
             (platform == global_config.bot.platform and user_id == global_config.bot.qq_account)
             or (platform == "telegram" and user_id == getattr(global_config.bot, "telegram_account", ""))
+            or (platform == "discord" and user_id.lower() == global_config.bot.nickname.lower())
         ):
             person_name = f"{global_config.bot.nickname}(你)"
 
@@ -876,7 +881,7 @@ async def build_anonymous_messages(messages: List[DatabaseMessages]) -> str:
 
         if (platform == "qq" and user_id == global_config.bot.qq_account) or (
             platform == "telegram" and user_id == getattr(global_config.bot, "telegram_account", "")
-        ):
+        ) or (platform == "discord" and user_id.lower() == global_config.bot.nickname.lower()):
             # print("SELF11111111111111")
             return "SELF"
         try:
@@ -954,7 +959,10 @@ async def get_person_id_list(messages: List[Dict[str, Any]]) -> List[str]:
         user_id: str = msg.get("user_id")  # type: ignore
 
         # 检查必要信息是否存在 且 不是机器人自己
-        if not all([platform, user_id]) or user_id == global_config.bot.qq_account:
+        is_bot = (user_id == global_config.bot.qq_account) or (
+            platform == "discord" and user_id.lower() == global_config.bot.nickname.lower()
+        )
+        if not all([platform, user_id]) or is_bot:
             continue
 
         # 添加空值检查，防止 platform 为 None 时出错

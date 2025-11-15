@@ -90,8 +90,11 @@ async def _send_to_target(
         message_id = f"send_api_{int(current_time * 1000)}"
 
         # 构建机器人用户信息
+        # For Discord, use bot's nickname as user_id (consistent with how Discord users are identified)
+        # For other platforms, use QQ account as user_id
+        bot_user_id = global_config.bot.nickname.lower() if target_stream.platform == "discord" else global_config.bot.qq_account
         bot_user_info = UserInfo(
-            user_id=global_config.bot.qq_account,
+            user_id=bot_user_id,
             user_nickname=global_config.bot.nickname,
             platform=target_stream.platform,
         )

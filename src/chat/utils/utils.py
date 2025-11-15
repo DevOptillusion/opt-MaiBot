@@ -596,6 +596,7 @@ def get_chat_type_and_target_info(chat_id: str) -> Tuple[bool, Optional["TargetP
                 # Try to fetch person info
                 try:
                     person = Person(platform=platform, user_id=user_id)
+                    logger.info(f"platform: {platform}, user_id: {user_id}, person: {person}")
                     if not person.is_known:
                         logger.warning(f"用户 {user_info.user_nickname} 尚未认识")
                         # 如果用户尚未认识，则返回False和None

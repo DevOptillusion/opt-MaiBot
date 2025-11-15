@@ -6,3 +6,5 @@ if "openai" in used_client_types:
     from . import openai_client  # noqa: F401
 if "gemini" in used_client_types:
     from . import gemini_client  # noqa: F401
+if "claude" in used_client_types:
+    from . import claude_client  # noqa: F401
